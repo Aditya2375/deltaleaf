@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="referrer" content="no-referrer" />
+    <title>deltaleaf - a cash-financed delta hedge</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="src/app.js"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <a class="wordmark" href="./">deltaleaf <span>/ 16</span></a
+        ><span class="eyebrow">SYNTHETIC PATHS · DISCRETE HEDGES</span>
+      </header>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">DELTA HEDGING / FOLLOW THE CASH</p>
+          <h1>One option.<br />Many small trades.</h1>
+        </div>
+        <p>
+          Sell a European option. Hold its delta in stock. Finance every
+          adjustment in cash. What is left at expiry?
+        </p>
+      </section>
+      <form id="controls">
+        <label
+          >Contract<select id="kind">
+            <option value="call">Call</option>
+            <option value="put">Put</option>
+          </select></label
+        ><label
+          >Path volatility / %<input
+            id="pathSigma"
+            type="number"
+            min="10"
+            max="50"
+            step="1"
+            value="20"
+            required /></label
+        ><label
+          >Hedge volatility / %<input
+            id="hedgeSigma"
+            type="number"
+            min="10"
+            max="50"
+            step="1"
+            value="20"
+            required /></label
+        ><label
+          >Cost / one-way bps<input
+            id="bps"
+            type="number"
+            min="0"
+            max="25"
+            step="0.5"
+            value="5"
+            required /></label
+        ><label
+          >Hedge intervals<select id="intervals">
+            <option>1</option>
+            <option>4</option>
+            <option>12</option>
+            <option selected>28</option>
+            <option>84</option>
+            <option>252</option>
+          </select></label
+        ><label
+          >Seed / integer<input
+            id="seed"
+            type="number"
+            min="1"
+            max="999999"
+            step="1"
+            value="2375"
+            required /></label
+        ><button type="submit">
+          Run experiment <span aria-hidden="true">↗</span>
+        </button>
+      </form>
+      <p id="status" class="eyebrow" role="status" aria-live="polite"></p>
+      <p class="scope">
+        Short 1 option · spot 100 · strike 100 · expiry 1 year · rate 2%,
+        continuous · zero dividends. Invented GBM paths with drift fixed at the
+        pricing rate, not market data or a forecast. All prices and P&amp;L are
+        per underlying unit, no currency.
+      </p>
+      <section class="metrics" aria-label="Single illustrated path results">
+        <div>
+          <p>Initial option premium</p>
+          <strong id="premium"></strong><small>Uses hedge volatility</small>
+        </div>
+        <div>
+          <p>Gross terminal P&amp;L</p>
+          <strong id="gross"></strong
+          ><small>Same hedge, zero trading cost</small>
+        </div>
+        <div>
+          <p>Net terminal P&amp;L</p>
+          <strong id="net"></strong
+          ><small>After costs and their financing</small>
+        </div>
+        <div>
+          <p>Costs at expiry value</p>
+          <strong id="financed"></strong><small id="nominal"></small>
+        </div>
+      </section>
+      <section>
+        <div class="sectionhead">
+          <h2>01 / A single invented path</h2>
+          <p id="pathnote"></p>
+        </div>
+        <div class="plots">
+          <div>
+            <h3>Underlying price</h3>
+            <svg
+              id="spotChart"
+              role="img"
+              aria-label="Illustrated synthetic spot path over one year"
+            ></svg>
+            <p class="caption">
+              253 equally spaced GBM observations. The hedge samples this same
+              path at its chosen dates.
+            </p>
+          </div>
+          <div>
+            <h3>Hedge equity minus option mark</h3>
+            <svg
+              id="errorChart"
+              role="img"
+              aria-label="Discrete net hedging residual at hedge dates"
+            ></svg>
+            <p class="caption">
+              After each trade and its fee. At expiry: liquidate the stock, then
+              subtract the cash-settled payoff. Segments connect observations,
+              not intra-step valuations.
+            </p>
+          </div>
+        </div>
+      </section>
+      <section>
+        <div class="sectionhead">
+          <h2>02 / Read one cash movement</h2>
+          <p id="rownote"></p>
+        </div>
+        <label class="sliderlabel"
+          >Inspect hedge event / opening through liquidation<input
+            id="event"
+            type="range"
+            min="0"
+            max="28"
+            value="0"
+            step="1"
+        /></label>
+        <div class="audit" id="audit"></div>
+        <p id="equation" class="equation"></p>
+        <p class="caption">
+          Accrued cash is the previous cash balance grown at 2%. Trade = new
+          stock holding minus old holding. Fee = |trade| × spot × bps / 10,000.
+          Borrowing and deposits use the same rate. No external cash is added
+          after the option premium.
+        </p>
+        <details>
+          <summary>
+            Every hedge event / full precision calculation, rounded display
+          </summary>
+          <div
+            class="tablewrap ledger"
+            tabindex="0"
+            aria-label="Cash ledger, scroll for all columns and events"
+          >
+            <table id="ledger">
+              <thead>
+                <tr>
+                  <th>Step</th>
+                  <th>Spot</th>
+                  <th>Accrued cash</th>
+                  <th>Old shares</th>
+                  <th>New shares</th>
+                  <th>Trade</th>
+                  <th>Fee</th>
+                  <th>Cash</th>
+                  <th>Option mark</th>
+                  <th>Hedge equity</th>
+                  <th>Residual</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </details>
+      </section>
+      <section>
+        <div class="sectionhead">
+          <h2>03 / More hedges, at a cost</h2>
+          <p>128 other seeded paths · same paths for every frequency</p>
+        </div>
+        <svg
+          id="compareChart"
+          role="img"
+          aria-label="Gross and net terminal root mean square hedging error for six hedge frequencies"
+        ></svg>
+        <p class="legend">
+          <span>Gross RMSE / solid</span> <span>Net RMSE / dashed</span>
+        </p>
+        <p class="caption">
+          RMSE = √mean(P&amp;L²), relative to zero. SD uses divisor 128 and
+          measures dispersion around the sample mean. These are descriptive
+          results from a small pseudorandom sample, not uncertainty bounds or an
+          optimal hedge frequency. Frequencies are equally spaced categories,
+          not a linear scale. Finer hedging need not improve a path or sample;
+          costs can dominate.
+        </p>
+        <div
+          class="tablewrap"
+          tabindex="0"
+          aria-label="Comparison table, scroll for all columns"
+        >
+          <table id="comparison">
+            <thead>
+              <tr>
+                <th>Intervals</th>
+                <th>Gross RMSE</th>
+                <th>Net RMSE</th>
+                <th>Net mean</th>
+                <th>Net SD</th>
+                <th>Mean nominal fees</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+      <section>
+        <div class="sectionhead">
+          <h2>04 / The accounting, not a promise</h2>
+          <p>Chosen model assumptions, not fitted parameters</p>
+        </div>
+        <div class="method">
+          <div>
+            <h3>Price, then hold.</h3>
+            <p>
+              Black-Scholes price and delta use the hedge volatility. Start with
+              the premium, buy delta shares, and subtract the opening fee.
+              Recompute delta only before expiry at the selected hedge dates. At
+              expiry, the stock holding is set to zero for liquidation, not to
+              an expiry Black-Scholes delta.
+            </p>
+            <p>
+              The 252 equal model steps span one year. They are not a trading
+              calendar. N intervals means an opening trade, N − 1 interior
+              rebalances, and one final liquidation.
+            </p>
+          </div>
+          <div>
+            <h3>Keep the financing.</h3>
+            <p>
+              For each hedge event: B′ = B × exp(0.02 × Δt) − (new Δ − old Δ) ×
+              S − fee. Hedge equity is B′ + new Δ × S. Residual subtracts the
+              option mark. Terminal P&amp;L subtracts the payoff after
+              liquidation.
+            </p>
+            <p>
+              Costs are one-way proportional fees on stock notional at opening,
+              each interior trade and closing. The gross-minus-net P&amp;L
+              equals fees compounded to expiry, not their nominal sum. There is
+              no option fee or premium adjustment for costs.
+            </p>
+          </div>
+          <div>
+            <h3>Know what is missing.</h3>
+            <p>
+              Exact GBM grid transitions: S′ = S × exp[(0.02 − σ²/2)Δt + σ√Δt
+              Z]. Seeded LCG and Box-Muller normal draws are reproducible
+              teaching tools, not a production simulation library. The
+              illustrated path uses stream 0; the comparison uses streams 1
+              through 128.
+            </p>
+            <p>
+              No jumps, stochastic volatility, dividends, spreads beyond the
+              chosen proportional fee, liquidity limits, margin, asymmetric
+              funding, parameter fitting, real trades or risk guarantees. This
+              is an educational simulation, not investment advice.
+            </p>
+          </div>
+        </div>
+      </section>
+      <p class="sources">
+        Background:
+        <a
+          href="https://web.ma.utexas.edu/users/mcudina/m339w-delta-hedging-continued.pdf"
+          >Discrete self-financing</a
+        >
+        ·
+        <a href="https://www.macroption.com/black-scholes-formula/"
+          >Black-Scholes formulas</a
+        >
+        ·
+        <a
+          href="https://johnarmstrongmaths.com/courses/fm06/book/matlab-chapter6.pdf"
+          >Discrete hedging and costs</a
+        >. No outside code, data, fonts or assets bundled.
+      </p>
+      <footer>
+        <span>deltaleaf / Java core + local browser mirror</span
+        ><span>MIT OR Apache-2.0 · No accounts, uploads or storage</span>
+      </footer>
+    </main>
+  </body>
+</html>
